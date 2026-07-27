@@ -131,7 +131,7 @@ export async function runDeadlineChecks(db: any): Promise<void> {
 
         // Calculate difference in days
         const timeDiff = deadline.getTime() - now.getTime();
-        const diffDays = Math.ceil(timeDiff / (1000 * 60 * 60 * 24));
+        const diffDays = Math.floor(timeDiff / (1000 * 60 * 60 * 24));
 
         // Trigger alerts on 7, 3, 2 (~48 hours), 1, or 0 days remaining
         if (![7, 3, 2, 1, 0].includes(diffDays)) {
