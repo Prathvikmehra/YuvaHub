@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { dbCommand, dbQuery } from "../db.js";
 import { safeObjectId } from "../../lib/utils.js";
 import { AppError } from "../../lib/AppError.js";
+import { parsePagination, paginate } from "../../lib/pagination.js";
 
 export const createTeam = async (req: Request, res: Response) => {
   const { name, opportunityId, opportunityTitle, description, requiredRoles, maxMembers } = req.body;
@@ -26,6 +27,7 @@ export const createTeam = async (req: Request, res: Response) => {
 };
 
 export const listTeams = async (req: Request, res: Response) => {
+  const { page, limit, skip } = parsePagination(req.query);
   const { opportunityId, q, role, status } = req.query;
   const queryFilter: any = {};
 
@@ -40,10 +42,13 @@ export const listTeams = async (req: Request, res: Response) => {
     ];
   }
 
-  const teams = await dbCommand.collection("teams").find(queryFilter).sort({ createdAt: -1 }).toArray();
+  const [teams, total] = await Promise.all([
+    dbCommand.collection("teams").find(queryFilter).sort({ createdAt: -1 }).skip(skip).limit(limit).toArray(),
+    dbCommand.collection("teams").countDocuments(queryFilter)
+  ]);
   const formatted = teams.map((t: any) => ({ id: t._id.toString(), _id: t._id.toString(), ...t }));
 
-  return res.json({ teams: formatted, total: formatted.length });
+  return res.json(paginate(formatted, page, limit, total));
 };
 
 export const getTeamById = async (req: Request, res: Response) => {

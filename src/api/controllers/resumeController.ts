@@ -2,16 +2,22 @@ import { Request, Response } from "express";
 import { dbCommand, dbQuery } from "../db.js";
 import { safeObjectId } from "../../lib/utils.js";
 import { AppError } from "../../lib/AppError.js";
+import { parsePagination, paginate } from "../../lib/pagination.js";
 
 export const handleListResumes = async (req: any, res: any) => {
   const user = req.user;
   if (!user || !user.uid) throw AppError.unauthorized("Unauthorized");
   if (!dbQuery) throw AppError.serviceUnavailable("Database unavailable");
 
+  const { page, limit, skip } = parsePagination(req.query);
   const resumesCol = dbQuery.collection("resumes");
-  const list = await resumesCol.find({ userId: user.uid }).sort({ isDefault: -1, uploadedAt: -1 }).toArray();
+  const filter = { userId: user.uid };
+  const [list, total] = await Promise.all([
+    resumesCol.find(filter).sort({ isDefault: -1, uploadedAt: -1 }).skip(skip).limit(limit).toArray(),
+    resumesCol.countDocuments(filter)
+  ]);
   const formatted = list.map((r: any) => ({ ...r, id: r._id.toString() }));
-  res.json({ status: "success", resumes: formatted });
+  res.json(paginate(formatted, page, limit, total));
 };
 
 export const handleCreateResume = async (req: any, res: any) => {

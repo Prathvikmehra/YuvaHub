@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { dbCommand, dbQuery } from "../db.js";
 import { AppError } from "../../lib/AppError.js";
+import { parsePagination, paginate } from "../../lib/pagination.js";
 
 const sseClients: any[] = [];
 
@@ -133,19 +134,25 @@ export const scraperStats = async (req: Request, res: Response) => {
 };
 
 export const scraperLogs = async (req: Request, res: Response) => {
+    const { page, limit, skip } = parsePagination(req.query);
     if (dbQuery) {
-      const logs = await dbQuery.collection("scraper_logs").find({}).sort({ createdAt: -1 }).limit(50).toArray();
+      const [logs, total] = await Promise.all([
+        dbQuery.collection("scraper_logs").find({}).sort({ createdAt: -1 }).skip(skip).limit(limit).toArray(),
+        dbQuery.collection("scraper_logs").countDocuments({})
+      ]);
       if (logs.length > 0) {
-        return res.json(logs);
+        return res.json(paginate(logs, page, limit, total));
       }
     }
-    res.json([
+    const mockLogs = [
       { id: "log_101", sourceName: "Devpost Scraper", status: "success", startTime: new Date(Date.now() - 15 * 60 * 1000).toISOString(), endTime: new Date(Date.now() - 14 * 60 * 1000).toISOString(), durationMs: 4520, opportunitiesAdded: 18, statusCode: 200, errorMessage: null, stackTrace: null },
       { id: "log_102", sourceName: "Unstop Scraper", status: "error", startTime: new Date(Date.now() - 45 * 60 * 1000).toISOString(), endTime: new Date(Date.now() - 44 * 60 * 1000).toISOString(), durationMs: 1210, opportunitiesAdded: 0, statusCode: 503, errorMessage: "HTTP 503 Service Unavailable: Rate limit exceeded on target endpoint", stackTrace: "FetchError: HTTP 503 Service Unavailable at UnstopScraper.fetchPage (src/scrapers/unstop.ts:42:11)\n    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)\n    at async runScrapeJob (src/workers/scraperWorker.ts:88:9)" },
       { id: "log_103", sourceName: "Devfolio Scraper", status: "success", startTime: new Date(Date.now() - 90 * 60 * 1000).toISOString(), endTime: new Date(Date.now() - 88 * 60 * 1000).toISOString(), durationMs: 3200, opportunitiesAdded: 14, statusCode: 200, errorMessage: null, stackTrace: null },
       { id: "log_104", sourceName: "Opportunities Circle Scraper", status: "success", startTime: new Date(Date.now() - 180 * 60 * 1000).toISOString(), endTime: new Date(Date.now() - 178 * 60 * 1000).toISOString(), durationMs: 2900, opportunitiesAdded: 22, statusCode: 200, errorMessage: null, stackTrace: null },
       { id: "log_105", sourceName: "Eventbrite Scraper", status: "error", startTime: new Date(Date.now() - 360 * 60 * 1000).toISOString(), endTime: new Date(Date.now() - 359 * 60 * 1000).toISOString(), durationMs: 890, opportunitiesAdded: 0, statusCode: 404, errorMessage: "DOM Selector Failure: Unable to locate container '.event-card-wrapper'", stackTrace: "ValidationError: Target selector .event-card-wrapper returned 0 elements\n    at EventbriteScraper.parseHTML (src/scrapers/eventbrite.ts:68:15)\n    at async EventbriteScraper.scrape (src/scrapers/eventbrite.ts:24:5)" }
-    ]);
+    ];
+    const sliced = mockLogs.slice(skip, skip + limit);
+    res.json(paginate(sliced, page, limit, mockLogs.length));
 };
 
 export const triggerScraper = async (req: Request, res: Response) => {

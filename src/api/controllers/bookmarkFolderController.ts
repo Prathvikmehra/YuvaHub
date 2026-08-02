@@ -1,21 +1,29 @@
 import { Request, Response } from "express";
 import { dbCommand, dbQuery } from "../db.js";
 import { AppError } from "../../lib/AppError.js";
+import { parsePagination, paginate } from "../../lib/pagination.js";
 
 export const getFolders = async (req: Request, res: Response) => {
-  const uid = req.query.uid as string || "user_default";
-  if (dbQuery) {
-    const folders = await dbQuery.collection("bookmark_folders").find({ uid }).toArray();
-    if (folders.length > 0) {
-      return res.json(folders);
+    const { page, limit, skip } = parsePagination(req.query);
+    const uid = req.query.uid as string || "user_default";
+    if (dbQuery) {
+      const filter = { uid };
+      const [folders, total] = await Promise.all([
+        dbQuery.collection("bookmark_folders").find(filter).skip(skip).limit(limit).toArray(),
+        dbQuery.collection("bookmark_folders").countDocuments(filter)
+      ]);
+      if (folders.length > 0) {
+        return res.json(paginate(folders, page, limit, total));
+      }
     }
-  }
 
-  res.json([
-    { folderId: "f_1", uid, name: "GSoC 2026", color: "blue", opportunityIds: [], createdAt: new Date().toISOString() },
-    { folderId: "f_2", uid, name: "Backend Internships", color: "emerald", opportunityIds: [], createdAt: new Date().toISOString() },
-    { folderId: "f_3", uid, name: "US Scholarships", color: "purple", opportunityIds: [], createdAt: new Date().toISOString() }
-  ]);
+    const defaults = [
+      { folderId: "f_1", uid, name: "GSoC 2026", color: "blue", opportunityIds: [], createdAt: new Date().toISOString() },
+      { folderId: "f_2", uid, name: "Backend Internships", color: "emerald", opportunityIds: [], createdAt: new Date().toISOString() },
+      { folderId: "f_3", uid, name: "US Scholarships", color: "purple", opportunityIds: [], createdAt: new Date().toISOString() }
+    ];
+    const sliced = defaults.slice(skip, skip + limit);
+    res.json(paginate(sliced, page, limit, defaults.length));
 };
 
 export const createFolder = async (req: Request, res: Response) => {

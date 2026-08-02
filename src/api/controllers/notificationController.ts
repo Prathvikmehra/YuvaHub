@@ -2,24 +2,33 @@ import { Request, Response } from "express";
 import { dbCommand, dbQuery } from "../db.js";
 import { safeObjectId } from "../../lib/utils.js";
 import { AppError } from "../../lib/AppError.js";
+import { parsePagination, paginate } from "../../lib/pagination.js";
 
 export const getNotifications = async (req: Request, res: Response) => {
   try {
     const user = req.user;
     if (!dbQuery) return res.status(503).json({ error: "Database not available" });
 
+    const { page, limit, skip } = parsePagination(req.query);
     const collection = dbQuery.collection("notifications");
     let items;
+    let total = 0;
 
     if ((dbQuery as any).isMock) {
       items = (collection as any).data ? (collection as any).data.filter((n: any) => n.userId === user.uid || n.userId === "global-subscribers") : [];
+      total = items.length;
+      items = items.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(skip, skip + limit);
     } else {
-      items = await collection.find({
+      const filter = {
         $or: [
           { userId: user.uid },
           { userId: "global-subscribers" }
         ]
-      }).sort({ createdAt: -1 }).toArray();
+      };
+      [items, total] = await Promise.all([
+        collection.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).toArray(),
+        collection.countDocuments(filter)
+      ]);
     }
 
     const formatted = items.map((item: any) => {
@@ -39,7 +48,7 @@ export const getNotifications = async (req: Request, res: Response) => {
       return copy;
     });
 
-    res.json(formatted);
+    res.json(paginate(formatted, page, limit, total));
   } catch (err: any) {
     console.error("GET /api/v1/notifications error:", err);
     res.json([

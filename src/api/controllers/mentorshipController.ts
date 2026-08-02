@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { dbCommand, dbQuery } from "../db.js";
 import { AppError } from "../../lib/AppError.js";
+import { parsePagination, paginate } from "../../lib/pagination.js";
 
 export const getMentorAvailability = async (req: Request, res: Response) => {
   const mentorUid = (req.query.mentorUid as string) || "mentor_default";
@@ -58,26 +59,31 @@ export const bookSession = async (req: Request, res: Response) => {
 };
 
 export const getSessions = async (req: Request, res: Response) => {
-  const uid = (req.query.uid as string) || "user_default";
-  if (dbQuery) {
-    const sessions = await dbQuery.collection("mentorship_sessions").find({
-      $or: [{ studentUid: uid }, { mentorUid: uid }]
-    }).sort({ createdAt: -1 }).toArray();
+    const { page, limit, skip } = parsePagination(req.query);
+    const uid = (req.query.uid as string) || "user_default";
+    if (dbQuery) {
+      const filter = { $or: [{ studentUid: uid }, { mentorUid: uid }] };
+      const [sessions, total] = await Promise.all([
+        dbQuery.collection("mentorship_sessions").find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).toArray(),
+        dbQuery.collection("mentorship_sessions").countDocuments(filter)
+      ]);
 
-    return res.json(sessions);
-  }
+      return res.json(paginate(sessions, page, limit, total));
+    }
 
-  res.json([{
-    sessionId: "sess_demo_1",
-    studentUid: uid,
-    mentorUid: "m_sarah",
-    mentorName: "Sarah Jenkins (Senior SWE @ Google)",
-    topic: "GSoC Proposal & System Design Review",
-    slotDateTime: "2026-07-25 at 10:00 AM IST",
-    meetingUrl: "https://meet.jit.si/yuvahub-mentorship-gsoc",
-    status: "Confirmed",
-    createdAt: new Date().toISOString()
-  }]);
+    const demo = [{
+      sessionId: "sess_demo_1",
+      studentUid: uid,
+      mentorUid: "m_sarah",
+      mentorName: "Sarah Jenkins (Senior SWE @ Google)",
+      topic: "GSoC Proposal & System Design Review",
+      slotDateTime: "2026-07-25 at 10:00 AM IST",
+      meetingUrl: "https://meet.jit.si/yuvahub-mentorship-gsoc",
+      status: "Confirmed",
+      createdAt: new Date().toISOString()
+    }];
+    const sliced = demo.slice(skip, skip + limit);
+    res.json(paginate(sliced, page, limit, demo.length));
 };
 
 export const updateSessionStatus = async (req: Request, res: Response) => {
