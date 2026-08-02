@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { dbCommand, dbQuery } from "../db.js";
+import { AppError } from "../../lib/AppError.js";
 
 const sseClients: any[] = [];
 
@@ -132,7 +133,6 @@ export const scraperStats = async (req: Request, res: Response) => {
 };
 
 export const scraperLogs = async (req: Request, res: Response) => {
-  try {
     if (dbQuery) {
       const logs = await dbQuery.collection("scraper_logs").find({}).sort({ createdAt: -1 }).limit(50).toArray();
       if (logs.length > 0) {
@@ -146,13 +146,9 @@ export const scraperLogs = async (req: Request, res: Response) => {
       { id: "log_104", sourceName: "Opportunities Circle Scraper", status: "success", startTime: new Date(Date.now() - 180 * 60 * 1000).toISOString(), endTime: new Date(Date.now() - 178 * 60 * 1000).toISOString(), durationMs: 2900, opportunitiesAdded: 22, statusCode: 200, errorMessage: null, stackTrace: null },
       { id: "log_105", sourceName: "Eventbrite Scraper", status: "error", startTime: new Date(Date.now() - 360 * 60 * 1000).toISOString(), endTime: new Date(Date.now() - 359 * 60 * 1000).toISOString(), durationMs: 890, opportunitiesAdded: 0, statusCode: 404, errorMessage: "DOM Selector Failure: Unable to locate container '.event-card-wrapper'", stackTrace: "ValidationError: Target selector .event-card-wrapper returned 0 elements\n    at EventbriteScraper.parseHTML (src/scrapers/eventbrite.ts:68:15)\n    at async EventbriteScraper.scrape (src/scrapers/eventbrite.ts:24:5)" }
     ]);
-  } catch (err) {
-    res.status(500).json({ error: "Failed to fetch scraper logs" });
-  }
 };
 
 export const triggerScraper = async (req: Request, res: Response) => {
-  try {
     const sourceName = req.body.source_name || req.body.sourceName || "Manual Scraper Run";
     const logDoc = {
       id: "log_" + Date.now(),
@@ -177,9 +173,6 @@ export const triggerScraper = async (req: Request, res: Response) => {
       message: `Scraper execution completed for ${sourceName}.`,
       log: logDoc
     });
-  } catch (err: any) {
-    res.status(500).json({ error: "Scraper execution failed: " + err.message });
-  }
 };
 
 export const adminIncidents = (req: Request, res: Response) => {
@@ -187,16 +180,11 @@ export const adminIncidents = (req: Request, res: Response) => {
 };
 
 export const adminDeleteUser = async (req: Request, res: Response) => {
-  try {
     if (!dbCommand || !dbQuery) {
-      return res.status(503).json({ error: "Database unavailable" });
+      throw AppError.serviceUnavailable("Database unavailable");
     }
     const userId = req.params.id;
     res.json({ status: "success", message: `User ${userId} deleted successfully.` });
-  } catch (err) {
-    console.error("Failed to delete user:", err);
-    res.status(500).json({ error: "Internal Server Error" });
-  }
 };
 
 export const adminTelemetryStream = (req: Request, res: Response) => {
@@ -229,7 +217,6 @@ export const adminTelemetryStream = (req: Request, res: Response) => {
 };
 
 export const triggerNodeScraper = async (req: Request, res: Response) => {
-  try {
     const { spawn } = await import("child_process");
     const child = spawn("npx", ["tsx", "scrape-cli.ts"], {
       cwd: process.cwd(),
@@ -241,8 +228,4 @@ export const triggerNodeScraper = async (req: Request, res: Response) => {
       console.error("[Manual Node Trigger] Child process error (failed to spawn or crashed):", err);
     });
     res.json({ message: "Node.js Central Ingestion pipeline triggered asynchronously." });
-  } catch (err: any) {
-    console.error("Manual Node trigger failed:", err);
-    res.status(500).json({ error: "Failed to run Node.js central pipeline." });
-  }
 };

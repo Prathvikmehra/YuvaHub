@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { getGenAI, getAIFallback, getCachedResponse, setCachedResponse } from "../genai.js";
+import { AppError } from "../../lib/AppError.js";
 
 export const aiGenerate = async (req: Request, res: Response) => {
   try {
@@ -146,10 +147,9 @@ Return JSON strictly in this format:
 };
 
 export const handleCareerRoadmap = async (req: Request, res: Response) => {
-  try {
     const { education, targetRole, currentSkills, timeframe } = req.body;
     if (!targetRole) {
-      return res.status(400).json({ error: "Target role is required" });
+      throw AppError.badRequest("Target role is required");
     }
 
     const roleStr = targetRole || "Software Engineer";
@@ -243,20 +243,15 @@ Return ONLY a JSON object strictly adhering to this schema:
 
     setCachedResponse(cacheKey, parsed);
     res.json(parsed);
-  } catch (err) {
-    console.error("/api/ai/career-roadmap error:", err);
-    res.status(500).json({ error: "Internal Server Error" });
-  }
 };
 
 export const analyzeResume = async (req: Request, res: Response) => {
-  try {
     const { resumeBase64, fileName, jobDescription, resumeText } = req.body;
     if (!resumeBase64 && !resumeText) {
-      return res.status(400).json({ error: "No resume file or text provided" });
+      throw AppError.badRequest("No resume file or text provided");
     }
     if (!jobDescription) {
-      return res.status(400).json({ error: "No job description provided" });
+      throw AppError.badRequest("No job description provided");
     }
 
     const cacheInput = resumeBase64 ? resumeBase64.substring(0, 200) : (resumeText || "").substring(0, 200);
@@ -350,8 +345,4 @@ export const analyzeResume = async (req: Request, res: Response) => {
 
     setCachedResponse(cacheKey, parsed);
     res.json(parsed);
-  } catch (err) {
-    console.error("/api/ai/analyze-resume error:", err);
-    res.status(500).json({ error: "Internal Server Error" });
-  }
 };

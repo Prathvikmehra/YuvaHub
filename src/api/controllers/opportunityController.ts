@@ -5,6 +5,7 @@ import escapeHtml from "escape-html";
 import { meiliClient } from "../../services/searchSync.js";
 import { generateOpportunityEmbedding } from "../../services/embedding.js";
 import { CURATED_FALLBACKS } from "../../services/staticFallbacks.js";
+import { AppError } from "../../lib/AppError.js";
 
 /**
  * Helper to escape user-controlled text strings for safe HTML / SEO metadata insertion
@@ -230,7 +231,6 @@ export async function getRankedOpportunities(database: any, profile: any, page: 
 }
 
 export const getOpportunities = async (req: Request, res: Response) => {
-  try {
     let page = parseInt((req.query.page as string) || "1", 10);
     if (req.query.cursor) {
       const cInt = parseInt(req.query.cursor as string, 10);
@@ -260,14 +260,9 @@ export const getOpportunities = async (req: Request, res: Response) => {
       next_cursor: result.next_page ? String(result.next_page) : null,
       items: result.items
     });
-  } catch (err) {
-    console.error("/api/v1/opportunities error:", err);
-    res.status(500).json({ error: "Internal Server Error" });
-  }
 };
 
 export const getTrendingOpportunities = async (req: Request, res: Response) => {
-  try {
     if (!dbCommand || !dbQuery) {
       return res.json({ num_results: 0, next_page: null, next_cursor: null, items: [] });
     }
@@ -280,21 +275,17 @@ export const getTrendingOpportunities = async (req: Request, res: Response) => {
       next_cursor: null,
       items: result.items
     });
-  } catch (err) {
-    res.status(500).json({ error: "Internal Server Error" });
-  }
 };
 
 export const semanticSearch = async (req: Request, res: Response) => {
-  try {
     const q = req.query.q as string;
     if (!q) {
-      return res.status(400).json({ error: "Missing query parameter 'q'" });
+      throw AppError.badRequest("Missing query parameter 'q'");
     }
 
     const queryEmbedding = await generateOpportunityEmbedding(q);
     if (!queryEmbedding) {
-      return res.status(500).json({ error: "Failed to generate embedding for query" });
+      throw AppError.internal("Failed to generate embedding for query");
     }
 
     if (!dbQuery) {
@@ -326,14 +317,9 @@ export const semanticSearch = async (req: Request, res: Response) => {
     const items = scoredItems.slice(0, 10);
 
     res.json({ num_results: items.length, items });
-  } catch (err) {
-    console.error("/api/v1/opportunities/semantic-search error:", err);
-    res.status(500).json({ error: "Internal Server Error" });
-  }
 };
 
 export const getLatestOpportunities = async (req: Request, res: Response) => {
-  try {
     if (!dbCommand || !dbQuery) {
       return res.json({ num_results: 0, items: [] });
     }
@@ -377,16 +363,11 @@ export const getLatestOpportunities = async (req: Request, res: Response) => {
     }
 
     res.json({ num_results: items.length, items });
-  } catch (err) {
-    console.error("/api/v1/opportunities/latest error:", err);
-    res.status(500).json({ error: "Internal Server Error" });
-  }
 };
 
 export const submitOpportunity = async (req: Request, res: Response) => {
-  try {
     const user = req.user;
-    if (!dbCommand) return res.status(503).json({ error: "Database not available" });
+    if (!dbCommand) throw AppError.serviceUnavailable("Database not available");
 
     const payload = req.body;
     const { randomUUID } = await import("crypto");
@@ -426,14 +407,9 @@ export const submitOpportunity = async (req: Request, res: Response) => {
     await dbCommand.collection('opportunities').insertOne(doc);
 
     res.status(201).json({ success: true });
-  } catch (err: any) {
-    console.error("[Submit Opportunity API Error]", err);
-    res.status(err.message?.startsWith("Unauthorized") ? 401 : 500).json({ error: err.message || "Internal Server Error" });
-  }
 };
 
 export const getOpportunityById = async (req: Request, res: Response) => {
-  try {
     const rawId = req.params.id;
 
     if (typeof rawId === 'string' && (rawId.startsWith("fall_ai_") || rawId.startsWith("scout_"))) {
@@ -449,7 +425,7 @@ export const getOpportunityById = async (req: Request, res: Response) => {
     }
 
     if (!dbCommand || !dbQuery) {
-      return res.status(404).json({ error: "Database offline" });
+      throw AppError.notFound("Database offline");
     }
 
     const oid = safeObjectId(rawId);
@@ -457,7 +433,7 @@ export const getOpportunityById = async (req: Request, res: Response) => {
       ? await dbQuery.collection("opportunities").findOne({ _id: oid })
       : await dbQuery.collection("opportunities").findOne({ id: rawId });
     if (!item) {
-      return res.status(404).json({ error: "Opportunity not found" });
+      throw AppError.notFound("Opportunity not found");
     }
 
     // SEC-08 FIX: Ensure title and description are escaped on response payload for SEO / Head metadata
@@ -472,15 +448,10 @@ export const getOpportunityById = async (req: Request, res: Response) => {
     delete mapped._id;
 
     res.json(mapped);
-  } catch (err) {
-    console.error("/api/v1/opportunity/:id error:", err);
-    res.status(500).json({ error: "Internal Server Error" });
-  }
 };
 
 export const updateOpportunity = async (req: Request, res: Response) => {
-  try {
-    if (!dbCommand || !dbQuery) return res.status(503).json({ error: "Database not available" });
+    if (!dbCommand || !dbQuery) throw AppError.serviceUnavailable("Database not available");
     const rawId = req.params.id;
     const id = Array.isArray(rawId) ? rawId[0] : rawId;
 
@@ -514,8 +485,4 @@ export const updateOpportunity = async (req: Request, res: Response) => {
     }
 
     res.json({ success: true, updated: result.modifiedCount > 0 });
-  } catch (err: any) {
-    console.error("/api/v1/opportunity/:id PUT error:", err);
-    res.status(500).json({ error: "Internal Server Error" });
-  }
 };

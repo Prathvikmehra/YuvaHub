@@ -4,6 +4,7 @@ import path from "path";
 import fs from "fs";
 import crypto from "crypto";
 import { dbCommand, dbQuery } from "../db.js";
+import { AppError } from "../../lib/AppError.js";
 // @ts-ignore
 import multer from "multer";
 
@@ -42,166 +43,154 @@ const sanitizeInputText = (str: string): string => {
 // --- HANDLERS & MIDDLEWARES ---
 
 export const handleSignatureRequest = async (req: any, res: any) => {
-  try {
-    const user = req.user;
-    const { fileType, extension } = req.body;
+  const user = req.user;
+  const { fileType, extension } = req.body;
 
-    if (!fileType || !extension) {
-      return res.status(400).json({ error: "Missing fileType or extension" });
-    }
-
-    const normalizedExt = extension.toLowerCase().replace(/^\./, "");
-    const allowedExtensions = ["pdf", "png", "jpeg", "jpg"];
-    if (!allowedExtensions.includes(normalizedExt)) {
-      return res.status(400).json({ error: "Unsupported file type. Only .pdf, .png, and .jpeg are allowed." });
-    }
-
-    let folder = "";
-    if (fileType === "resume") {
-      folder = `yuvahub/resumes/${user.uid}`;
-    } else if (fileType === "cover_letter") {
-      folder = `yuvahub/cover_letters/${user.uid}`;
-    } else if (fileType === "avatar") {
-      folder = `yuvahub/avatars/${user.uid}`;
-    } else {
-      return res.status(400).json({ error: "Invalid fileType" });
-    }
-
-    const timestamp = Math.round(new Date().getTime() / 1000);
-
-    const paramsToSign: Record<string, any> = { timestamp, folder };
-
-    if (fileType === "resume" || fileType === "cover_letter") {
-      paramsToSign.allowed_formats = "pdf";
-      if (normalizedExt !== "pdf") {
-        return res.status(400).json({ error: "Resumes and cover letters must be PDF format." });
-      }
-    } else if (fileType === "avatar") {
-      paramsToSign.allowed_formats = "png,jpg,jpeg";
-      if (!["png", "jpg", "jpeg"].includes(normalizedExt)) {
-        return res.status(400).json({ error: "Avatars must be PNG or JPEG format." });
-      }
-    }
-
-    const apiSecret = process.env.CLOUDINARY_API_SECRET || "";
-    if (!apiSecret) {
-      if (process.env.NODE_ENV !== "production") {
-        return res.json({
-          signature: "dummy_signature",
-          timestamp,
-          folder,
-          allowed_formats: paramsToSign.allowed_formats,
-          apiKey: "dummy_key",
-          cloudName: "dummy_cloud",
-          isDummy: true
-        });
-      }
-      return res.status(500).json({ error: "Cloudinary API Secret not configured." });
-    }
-
-    const signature = cloudinary.utils.api_sign_request(paramsToSign, apiSecret);
-
-    res.json({
-      signature,
-      timestamp,
-      folder,
-      allowed_formats: paramsToSign.allowed_formats,
-      apiKey: process.env.CLOUDINARY_API_KEY,
-      cloudName: process.env.CLOUDINARY_CLOUD_NAME,
-    });
-
-  } catch (err: any) {
-    console.error("[Storage] Error generating signature:", err);
-    res.status(err.message?.startsWith("Unauthorized") ? 401 : 500).json({ error: err.message || "Internal Server Error" });
+  if (!fileType || !extension) {
+    throw AppError.badRequest("Missing fileType or extension");
   }
+
+  const normalizedExt = extension.toLowerCase().replace(/^\./, "");
+  const allowedExtensions = ["pdf", "png", "jpeg", "jpg"];
+  if (!allowedExtensions.includes(normalizedExt)) {
+    throw AppError.badRequest("Unsupported file type. Only .pdf, .png, and .jpeg are allowed.");
+  }
+
+  let folder = "";
+  if (fileType === "resume") {
+    folder = `yuvahub/resumes/${user.uid}`;
+  } else if (fileType === "cover_letter") {
+    folder = `yuvahub/cover_letters/${user.uid}`;
+  } else if (fileType === "avatar") {
+    folder = `yuvahub/avatars/${user.uid}`;
+  } else {
+    throw AppError.badRequest("Invalid fileType");
+  }
+
+  const timestamp = Math.round(new Date().getTime() / 1000);
+
+  const paramsToSign: Record<string, any> = { timestamp, folder };
+
+  if (fileType === "resume" || fileType === "cover_letter") {
+    paramsToSign.allowed_formats = "pdf";
+    if (normalizedExt !== "pdf") {
+      throw AppError.badRequest("Resumes and cover letters must be PDF format.");
+    }
+  } else if (fileType === "avatar") {
+    paramsToSign.allowed_formats = "png,jpg,jpeg";
+    if (!["png", "jpg", "jpeg"].includes(normalizedExt)) {
+      throw AppError.badRequest("Avatars must be PNG or JPEG format.");
+    }
+  }
+
+  const apiSecret = process.env.CLOUDINARY_API_SECRET || "";
+  if (!apiSecret) {
+    if (process.env.NODE_ENV !== "production") {
+      return res.json({
+        signature: "dummy_signature",
+        timestamp,
+        folder,
+        allowed_formats: paramsToSign.allowed_formats,
+        apiKey: "dummy_key",
+        cloudName: "dummy_cloud",
+        isDummy: true
+      });
+    }
+    throw AppError.internal("Cloudinary API Secret not configured.");
+  }
+
+  const signature = cloudinary.utils.api_sign_request(paramsToSign, apiSecret);
+
+  res.json({
+    signature,
+    timestamp,
+    folder,
+    allowed_formats: paramsToSign.allowed_formats,
+    apiKey: process.env.CLOUDINARY_API_KEY,
+    cloudName: process.env.CLOUDINARY_CLOUD_NAME,
+  });
 };
 
 export const handleSaveUpload = async (req: any, res: any) => {
-  try {
-    const user = req.user;
-    const { type, url, publicId } = req.body;
+  const user = req.user;
+  const { type, url, publicId } = req.body;
 
-    if (!type || !url || !publicId) {
-      return res.status(400).json({ error: "Missing type, url, or publicId" });
-    }
-
-    if (!["avatar", "resume", "cover_letter"].includes(type)) {
-      return res.status(400).json({ error: "Invalid document type" });
-    }
-
-    if (!dbCommand || !dbQuery) {
-      return res.status(503).json({ error: "Database not available" });
-    }
-
-    const usersCollection = dbQuery.collection("users");
-
-    const updateFields: Record<string, any> = {
-      updatedAt: new Date()
-    };
-
-    if (type === "avatar") {
-      updateFields.avatarUrl = url;
-      updateFields.avatarPublicId = publicId;
-    } else if (type === "resume") {
-      updateFields.resumeUrl = url;
-      updateFields.resumePublicId = publicId;
-
-      try {
-        const resumesCol = dbCommand.collection("resumes");
-        const existingCount = await resumesCol.countDocuments({ userId: user.uid });
-        const isDefault = existingCount === 0 || req.body.isDefault !== false;
-
-        if (isDefault) {
-          await resumesCol.updateMany({ userId: user.uid }, { $set: { isDefault: false } });
-        }
-
-        const now = new Date();
-        const rawOrigName = req.body.originalFileName || req.body.fileName || "resume.pdf";
-        const rawDispName = req.body.displayName || rawOrigName;
-
-        // Sanitize string inputs before database write
-        const origName = sanitizeInputText(rawOrigName);
-        const dispName = sanitizeInputText(rawDispName);
-
-        await resumesCol.insertOne({
-          userId: user.uid,
-          displayName: dispName,
-          originalFileName: origName,
-          fileUrl: url,
-          publicId: publicId || "",
-          uploadedAt: now,
-          updatedAt: now,
-          isDefault
-        });
-      } catch (resErr) {
-        console.error("[Storage] Failed to save resume history entry:", resErr);
-      }
-    } else if (type === "cover_letter") {
-      updateFields.coverLetterUrl = url;
-      updateFields.coverLetterPublicId = publicId;
-    }
-
-    await usersCollection.updateOne({ uid: user.uid }, { $set: updateFields });
-    const updatedProfile = await usersCollection.findOne({ uid: user.uid });
-
-    if (!updatedProfile) {
-      return res.status(404).json({ error: "User profile not found in database" });
-    }
-
-    if (updatedProfile._id) {
-      updatedProfile.id = updatedProfile._id.toString();
-      delete updatedProfile._id;
-    }
-
-    res.json({
-      status: "success",
-      profile: updatedProfile
-    });
-
-  } catch (err: any) {
-    console.error("[Storage] Error saving upload metadata:", err);
-    res.status(err.message?.startsWith("Unauthorized") ? 401 : 500).json({ error: err.message || "Internal Server Error" });
+  if (!type || !url || !publicId) {
+    throw AppError.badRequest("Missing type, url, or publicId");
   }
+
+  if (!["avatar", "resume", "cover_letter"].includes(type)) {
+    throw AppError.badRequest("Invalid document type");
+  }
+
+  if (!dbCommand || !dbQuery) {
+    throw AppError.serviceUnavailable("Database not available");
+  }
+
+  const usersCollection = dbQuery.collection("users");
+
+  const updateFields: Record<string, any> = {
+    updatedAt: new Date()
+  };
+
+  if (type === "avatar") {
+    updateFields.avatarUrl = url;
+    updateFields.avatarPublicId = publicId;
+  } else if (type === "resume") {
+    updateFields.resumeUrl = url;
+    updateFields.resumePublicId = publicId;
+
+    try {
+      const resumesCol = dbCommand.collection("resumes");
+      const existingCount = await resumesCol.countDocuments({ userId: user.uid });
+      const isDefault = existingCount === 0 || req.body.isDefault !== false;
+
+      if (isDefault) {
+        await resumesCol.updateMany({ userId: user.uid }, { $set: { isDefault: false } });
+      }
+
+      const now = new Date();
+      const rawOrigName = req.body.originalFileName || req.body.fileName || "resume.pdf";
+      const rawDispName = req.body.displayName || rawOrigName;
+
+      // Sanitize string inputs before database write
+      const origName = sanitizeInputText(rawOrigName);
+      const dispName = sanitizeInputText(rawDispName);
+
+      await resumesCol.insertOne({
+        userId: user.uid,
+        displayName: dispName,
+        originalFileName: origName,
+        fileUrl: url,
+        publicId: publicId || "",
+        uploadedAt: now,
+        updatedAt: now,
+        isDefault
+      });
+    } catch (resErr) {
+      console.error("[Storage] Failed to save resume history entry:", resErr);
+    }
+  } else if (type === "cover_letter") {
+    updateFields.coverLetterUrl = url;
+    updateFields.coverLetterPublicId = publicId;
+  }
+
+  await usersCollection.updateOne({ uid: user.uid }, { $set: updateFields });
+  const updatedProfile = await usersCollection.findOne({ uid: user.uid });
+
+  if (!updatedProfile) {
+    throw AppError.notFound("User profile not found in database");
+  }
+
+  if (updatedProfile._id) {
+    updatedProfile.id = updatedProfile._id.toString();
+    delete updatedProfile._id;
+  }
+
+  res.json({
+    status: "success",
+    profile: updatedProfile
+  });
 };
 
 // SECURE LOCAL UPLOAD MULTER INSTANCE
@@ -233,15 +222,11 @@ export const localUpload = multer({
 });
 
 export const handleLocalUpload = async (req: any, res: any) => {
-  try {
-    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
-    const publicUrl = `/uploads/${req.file.filename}`;
-    res.json({
-      secure_url: publicUrl,
-      public_id: req.file.filename,
-      format: path.extname(req.file.filename).replace('.', '')
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message || "Failed to handle local upload" });
-  }
+  if (!req.file) throw AppError.badRequest("No file uploaded");
+  const publicUrl = `/uploads/${req.file.filename}`;
+  res.json({
+    secure_url: publicUrl,
+    public_id: req.file.filename,
+    format: path.extname(req.file.filename).replace('.', '')
+  });
 };

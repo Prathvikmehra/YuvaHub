@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { dbCommand, dbQuery } from "../db.js";
 import { safeObjectId } from "../../lib/utils.js";
+import { AppError } from "../../lib/AppError.js";
 
 export const getNotifications = async (req: Request, res: Response) => {
   try {
@@ -55,56 +56,46 @@ export const getNotifications = async (req: Request, res: Response) => {
 };
 
 export const markRead = async (req: Request, res: Response) => {
-  try {
-    const user = req.user;
-    const rawNotifId = req.params.id;
-    const id = Array.isArray(rawNotifId) ? rawNotifId[0] : rawNotifId;
-    if (!dbCommand) return res.status(503).json({ error: "Database not available" });
+  const user = req.user;
+  const rawNotifId = req.params.id;
+  const id = Array.isArray(rawNotifId) ? rawNotifId[0] : rawNotifId;
+  if (!dbCommand) throw AppError.serviceUnavailable("Database not available");
 
-    const collection = dbCommand.collection("notifications");
-    const oid = safeObjectId(id);
-    const queryId = oid || id;
+  const collection = dbCommand.collection("notifications");
+  const oid = safeObjectId(id);
+  const queryId = oid || id;
 
-    if ((dbCommand as any).isMock) {
-      const notif = (collection as any).data ? (collection as any).data.find((n: any) => n.id === id || n._id?.toString() === id) : null;
-      if (notif) notif.read = true;
-    } else {
-      await collection.updateOne(
-        { _id: queryId, userId: user.uid },
-        { $set: { read: true } }
-      );
-    }
-
-    res.json({ success: true });
-  } catch (err: any) {
-    console.error("POST /api/v1/notifications/:id/read error:", err);
-    res.status(500).json({ error: "Internal Server Error" });
+  if ((dbCommand as any).isMock) {
+    const notif = (collection as any).data ? (collection as any).data.find((n: any) => n.id === id || n._id?.toString() === id) : null;
+    if (notif) notif.read = true;
+  } else {
+    await collection.updateOne(
+      { _id: queryId, userId: user.uid },
+      { $set: { read: true } }
+    );
   }
+
+  res.json({ success: true });
 };
 
 export const markAllRead = async (req: Request, res: Response) => {
-  try {
-    const user = req.user;
-    if (!dbCommand) return res.status(503).json({ error: "Database not available" });
+  const user = req.user;
+  if (!dbCommand) throw AppError.serviceUnavailable("Database not available");
 
-    const collection = dbCommand.collection("notifications");
+  const collection = dbCommand.collection("notifications");
 
-    if ((dbCommand as any).isMock) {
-      if ((collection as any).data) {
-        (collection as any).data.forEach((n: any) => {
-          if (n.userId === user.uid) n.read = true;
-        });
-      }
-    } else {
-      await collection.updateMany(
-        { userId: user.uid },
-        { $set: { read: true } }
-      );
+  if ((dbCommand as any).isMock) {
+    if ((collection as any).data) {
+      (collection as any).data.forEach((n: any) => {
+        if (n.userId === user.uid) n.read = true;
+      });
     }
-
-    res.json({ success: true });
-  } catch (err: any) {
-    console.error("POST /api/v1/notifications/read-all error:", err);
-    res.status(500).json({ error: "Internal Server Error" });
+  } else {
+    await collection.updateMany(
+      { userId: user.uid },
+      { $set: { read: true } }
+    );
   }
+
+  res.json({ success: true });
 };
